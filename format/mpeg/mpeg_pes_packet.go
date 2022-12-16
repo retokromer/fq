@@ -201,9 +201,9 @@ func pesPacketDecode(d *decode.D, _ any) any {
 		// nop
 	}
 
-	if d.BitsLeft() > 0 {
-		d.FieldRawLen("data", d.BitsLeft())
-	}
+	// if d.BitsLeft() > 0 {
+	// 	d.FieldRawLen("data", d.BitsLeft())
+	// }
 
 	return v
 }
