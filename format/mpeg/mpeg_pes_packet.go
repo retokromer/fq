@@ -100,30 +100,36 @@ func pesPacketDecode(d *decode.D, _ any) any {
 		isMPEG2 := d.PeekBits(2) == 0b01
 		if isMPEG2 {
 			d.FieldU2("marker_bits0", mpegVersion)
-		} else {
-			d.FieldU4("marker_bits0", mpegVersion)
-		}
-		scr0 := d.FieldU3("system_clock0")
-		d.FieldU1("marker_bits1")
-		scr1 := d.FieldU15("system_clock1")
-		d.FieldU1("marker_bits2")
-		scr2 := d.FieldU15("system_clock2")
-		d.FieldU1("marker_bits3")
-		if isMPEG2 {
+			scr0 := d.FieldU3("system_clock0")
+			d.FieldU1("marker_bits1")
+			scr1 := d.FieldU15("system_clock1")
+			d.FieldU1("marker_bits2")
+			scr2 := d.FieldU15("system_clock2")
+			d.FieldU1("marker_bits3")
 			d.FieldU9("scr_ext")
-		}
-		d.FieldU1("marker_bits4")
-		scr := scr0<<30 | scr1<<15 | scr2
-		d.FieldValueUint("scr", scr)
-		d.FieldU22("mux_rate")
-		d.FieldU1("marker_bits5")
-		if isMPEG2 {
+			d.FieldU1("marker_bits4")
+			scr := scr0<<30 | scr1<<15 | scr2
+			d.FieldValueUint("scr", scr)
+			d.FieldU22("mux_rate")
+			d.FieldU1("marker_bits5")
 			d.FieldU1("marker_bits6")
 			d.FieldU5("reserved")
 			packStuffingLength := d.FieldU3("pack_stuffing_length")
 			if packStuffingLength > 0 {
 				d.FieldRawLen("stuffing", int64(packStuffingLength*8))
 			}
+		} else {
+			d.FieldU4("marker_bits0", mpegVersion)
+			scr0 := d.FieldU3("system_clock0")
+			d.FieldU1("marker_bits1")
+			scr1 := d.FieldU15("system_clock1")
+			d.FieldU1("marker_bits2")
+			scr2 := d.FieldU15("system_clock2")
+			scr := scr0<<30 | scr1<<15 | scr2
+			d.FieldValueUint("scr", scr)
+			d.FieldU2("marker_bits3")
+			d.FieldU22("mux_rate")
+			d.FieldU1("marker_bits4")
 		}
 	case startCode == systemHeader:
 		d.FieldU16("length")
@@ -151,52 +157,91 @@ func pesPacketDecode(d *decode.D, _ any) any {
 		})
 	case startCode >= 0xbd:
 		length := d.FieldU16("length")
-		// 0xbd-0xbd // Privatestream1
-		// 0xc0-0xdf // MPEG1OrMPEG2AudioStream
-		// 0xe0-0xef // MPEG1OrMPEG2VideoStream
-		hasExtension := startCode == 0xbd || (startCode >= 0xc0 && startCode <= 0xef)
-		var headerDataLength uint64
-		var extensionLength uint64
-		if hasExtension {
-			extensionLength = 3
-			d.FieldStruct("extension", func(d *decode.D) {
-				d.FieldU2("skip0")
-				d.FieldU2("scramble_control")
-				d.FieldU1("priority")
-				d.FieldU1("data_alignment_indicator")
-				d.FieldU1("copyright")
-				d.FieldU1("original")
-				d.FieldU2("pts_dts_flags")
-				d.FieldU1("escr_flag")
-				d.FieldU1("es_rate_flag")
-				d.FieldU1("dsm_trick_mode_flag")
-				d.FieldU1("additional_copy_info_flag")
-				d.FieldU1("pes_crc_flag")
-				d.FieldU1("pes_ext_flag")
-				headerDataLength = d.FieldU8("header_data_length")
-			})
-			// TODO:
-			d.FieldRawLen("header_data", int64(headerDataLength)*8)
-		}
+		d.FramedFn(int64(length)*8, func(d *decode.D) {
+			// 0xbd-0xbd // Privatestream1
+			// 0xc0-0xdf // MPEG1OrMPEG2AudioStream
+			// 0xe0-0xef // MPEG1OrMPEG2VideoStream
+			hasExtension := startCode == 0xbd || (startCode >= 0xc0 && startCode <= 0xef)
+			var headerDataLength uint64
+			if hasExtension {
+				d.FieldStruct("extension", func(d *decode.D) {
+					d.FieldU2("skip0")
+					d.FieldU2("scramble_control")
+					d.FieldU1("priority")
+					d.FieldU1("data_alignment_indicator")
+					d.FieldU1("copyright")
+					d.FieldU1("original")
+					ptsDtsFlags := d.FieldU2("pts_dts_flags")
+					d.FieldU1("escr_flag")
+					esRateFlag := d.FieldU1("es_rate_flag")
+					dsmTrickModeFlag := d.FieldU1("dsm_trick_mode_flag")
+					d.FieldU1("additional_copy_info_flag")
+					d.FieldU1("pes_crc_flag")
+					d.FieldU1("pes_ext_flag")
+					headerDataLength = d.FieldU8("header_data_length") * 8
 
-		dataLen := int64(length-headerDataLength-extensionLength) * 8
+					switch ptsDtsFlags {
+					case 0b10:
+						d.FieldStruct("pts_dts", func(d *decode.D) {
+							d.FieldU4("const0010")
+							d.FieldU3("pts0")
+							d.FieldU1("marker_bit0")
+							d.FieldU15("pts1")
+							d.FieldU1("marker_bit1")
+							d.FieldU15("pts2")
+							d.FieldU1("marker_bit2")
+						})
+					case 0b11:
+						d.FieldStruct("pts_dts", func(d *decode.D) {
+							d.FieldU4("const0011")
+							d.FieldU3("pts0")
+							d.FieldU1("marker_bit0")
+							d.FieldU15("pts1")
+							d.FieldU1("marker_bit1")
+							d.FieldU15("pts2")
+							d.FieldU1("marker_bit2")
 
-		switch startCode {
-		case privateStream1:
-			d.FieldStruct("data", func(d *decode.D) {
-				d.FramedFn(dataLen, func(d *decode.D) {
+							d.FieldU4("const0001")
+							d.FieldU3("dts0")
+							d.FieldU1("marker_bit3")
+							d.FieldU15("dts1")
+							d.FieldU1("marker_bit4")
+							d.FieldU15("dts2")
+							d.FieldU1("marker_bit5")
+						})
+					}
+
+					if esRateFlag == 1 {
+						d.FieldStruct("es_rate", func(d *decode.D) {
+							d.FieldU1("marker_bit0")
+							d.FieldU22("es_rate")
+							d.FieldU1("marker_bit1")
+						})
+					}
+
+					if dsmTrickModeFlag == 1 {
+						d.FieldU8("dsm_trick_mode") // TODO
+					}
+				})
+				// TODO:
+				d.FieldRawLen("header_data", int64(headerDataLength))
+			}
+
+			switch startCode {
+			case privateStream1:
+				d.FieldStruct("data", func(d *decode.D) {
 					substreamNumber := d.FieldU8("substream")
-					substreamBR := d.FieldRawLen("data", dataLen-8)
+					substreamBR := d.FieldRawLen("data", d.BitsLeft())
 
 					v = subStreamPacket{
 						number: int(substreamNumber),
 						buf:    d.ReadAllBits(substreamBR),
 					}
 				})
-			})
-		default:
-			d.FieldRawLen("stream_data", dataLen)
-		}
+			default:
+				d.FieldRawLen("stream_data", d.BitsLeft())
+			}
+		})
 	default:
 		// nop
 	}
